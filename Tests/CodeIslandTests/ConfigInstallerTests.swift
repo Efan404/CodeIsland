@@ -100,11 +100,60 @@ final class ConfigInstallerTests: XCTestCase {
         XCTAssertTrue(eventNames.contains("PreToolUse"))
         XCTAssertTrue(eventNames.contains("PostToolUse"))
         XCTAssertTrue(eventNames.contains("PostToolUseFailure"))
-        XCTAssertTrue(eventNames.contains("PermissionRequest"))
+        XCTAssertFalse(eventNames.contains("PermissionRequest"), "Kimi does not support PermissionRequest")
         XCTAssertTrue(eventNames.contains("Stop"))
         XCTAssertTrue(eventNames.contains("SessionStart"))
         XCTAssertTrue(eventNames.contains("SessionEnd"))
         XCTAssertTrue(eventNames.contains("Notification"))
         XCTAssertTrue(eventNames.contains("PreCompact"))
+
+        let notificationTimeout = events.first { $0.0 == "Notification" }?.1
+        XCTAssertEqual(notificationTimeout, 600, "Kimi max timeout is 600")
+    }
+
+    /// Integration test: actually writes to ~/.kimi/config.toml and verifies hooks are installed.
+    /// Must not conflict with other running CodeIsland instances.
+    func testInstallKimiHooksIntegration() throws {
+        let fm = FileManager.default
+        let configPath = NSHomeDirectory() + "/.kimi/config.toml"
+
+        // Backup existing config
+        let backupPath = configPath + ".test.bak"
+        if fm.fileExists(atPath: configPath) {
+            try? fm.removeItem(atPath: backupPath)
+            try? fm.copyItem(atPath: configPath, toPath: backupPath)
+        }
+
+        // Ensure bridge binary exists (needed for install detection)
+        let codeislandDir = NSHomeDirectory() + "/.codeisland"
+        if !fm.fileExists(atPath: codeislandDir) {
+            try? fm.createDirectory(atPath: codeislandDir, withIntermediateDirectories: true)
+        }
+
+        // Install hooks
+        let ok = ConfigInstaller.setEnabled(source: "kimi", enabled: true)
+        XCTAssertTrue(ok, "Kimi hooks should install successfully")
+
+        // Verify file contents
+        let data = try XCTUnwrap(fm.contents(atPath: configPath))
+        let contents = try XCTUnwrap(String(data: data, encoding: .utf8))
+
+        XCTAssertTrue(contents.contains("[[hooks]]"))
+        XCTAssertTrue(contents.contains("event = \"PreToolUse\""))
+        XCTAssertTrue(contents.contains("event = \"Stop\""))
+        XCTAssertTrue(contents.contains("codeisland-bridge --source kimi"))
+        XCTAssertFalse(contents.contains("hooks = []"), "Scalar hooks key should be removed to avoid TOML duplicate key error")
+
+        // Check that install detection passes
+        XCTAssertTrue(ConfigInstaller.isInstalled(source: "kimi"), "isInstalled should report true after install")
+
+        // Uninstall and restore backup
+        ConfigInstaller.setEnabled(source: "kimi", enabled: false)
+        if fm.fileExists(atPath: backupPath) {
+            try? fm.removeItem(atPath: configPath)
+            try? fm.moveItem(atPath: backupPath, toPath: configPath)
+        }
     }
 }
+
+

@@ -339,18 +339,18 @@ struct ConfigInstaller {
                 ("errorOccurred", 5, true),
             ]
         case .kimi:
+            // Kimi Code CLI limits: max timeout 600, no PermissionRequest event
             return [
                 ("UserPromptSubmit", 5, true),
                 ("PreToolUse", 5, false),
                 ("PostToolUse", 5, true),
                 ("PostToolUseFailure", 5, true),
-                ("PermissionRequest", 86400, false),
                 ("Stop", 5, true),
                 ("SubagentStart", 5, true),
                 ("SubagentStop", 5, true),
                 ("SessionStart", 5, false),
                 ("SessionEnd", 5, true),
-                ("Notification", 86400, false),
+                ("Notification", 600, false),
                 ("PreCompact", 5, true),
             ]
         }
@@ -919,6 +919,14 @@ struct ConfigInstaller {
         }
 
         contents = removeKimiHooks(from: contents)
+        // Remove any legacy scalar `hooks = ...` assignment that conflicts with TOML array-of-tables
+        contents = contents
+            .components(separatedBy: "\n")
+            .filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return !trimmed.hasPrefix("hooks =")
+            }
+            .joined(separator: "\n")
 
         let quotedBridge = bridgeCommand.contains(" ") ? "\"\(bridgeCommand)\"" : bridgeCommand
         let baseCommand = "\(quotedBridge) --source \(cli.source)"
