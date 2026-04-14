@@ -111,48 +111,47 @@ final class ConfigInstallerTests: XCTestCase {
         XCTAssertEqual(notificationTimeout, 600, "Kimi max timeout is 600")
     }
 
-    /// Integration test: actually writes to ~/.kimi/config.toml and verifies hooks are installed.
-    /// Must not conflict with other running CodeIsland instances.
+    /// Hermetic integration test: uses a temporary directory instead of touching ~/.kimi/config.toml.
     func testInstallKimiHooksIntegration() throws {
         let fm = FileManager.default
-        let configPath = NSHomeDirectory() + "/.kimi/config.toml"
+        let tempDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
 
-        // Backup existing config
-        let backupPath = configPath + ".test.bak"
-        if fm.fileExists(atPath: configPath) {
-            try? fm.removeItem(atPath: backupPath)
-            try? fm.copyItem(atPath: configPath, toPath: backupPath)
-        }
+        let configPath = tempDir.appendingPathComponent("config.toml").path
+        let originalScalar = "hooks = [\"UserPromptSubmit\"]\n"
+        fm.createFile(atPath: configPath, contents: originalScalar.data(using: .utf8))
 
-        // Ensure bridge binary exists (needed for install detection)
-        let codeislandDir = NSHomeDirectory() + "/.codeisland"
-        if !fm.fileExists(atPath: codeislandDir) {
-            try? fm.createDirectory(atPath: codeislandDir, withIntermediateDirectories: true)
-        }
+        let cli = CLIConfig(
+            name: "Kimi Code CLI",
+            source: "kimi",
+            configPath: configPath,
+            configKey: "hooks",
+            format: .kimi,
+            events: ConfigInstaller.defaultEvents(for: .kimi)
+        )
 
         // Install hooks
-        let ok = ConfigInstaller.setEnabled(source: "kimi", enabled: true)
-        XCTAssertTrue(ok, "Kimi hooks should install successfully")
+        XCTAssertTrue(ConfigInstaller.installKimiHooks(cli: cli, fm: fm))
 
         // Verify file contents
         let data = try XCTUnwrap(fm.contents(atPath: configPath))
-        let contents = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let installed = try XCTUnwrap(String(data: data, encoding: .utf8))
 
-        XCTAssertTrue(contents.contains("[[hooks]]"))
-        XCTAssertTrue(contents.contains("event = \"PreToolUse\""))
-        XCTAssertTrue(contents.contains("event = \"Stop\""))
-        XCTAssertTrue(contents.contains("codeisland-bridge --source kimi"))
-        XCTAssertFalse(contents.contains("hooks = []"), "Scalar hooks key should be removed to avoid TOML duplicate key error")
+        XCTAssertTrue(installed.contains("[[hooks]]"))
+        XCTAssertTrue(installed.contains("event = \"PreToolUse\""))
+        XCTAssertTrue(installed.contains("event = \"Stop\""))
+        XCTAssertTrue(installed.contains("codeisland-bridge --source kimi"))
+        XCTAssertFalse(installed.contains("\nhooks = "), "Scalar hooks key should be commented out to avoid TOML duplicate key error")
+        XCTAssertTrue(installed.contains("# hooks ="), "Legacy scalar hooks should be preserved as comments")
 
-        // Check that install detection passes
-        XCTAssertTrue(ConfigInstaller.isInstalled(source: "kimi"), "isInstalled should report true after install")
+        // Uninstall and verify legacy hooks are restored
+        ConfigInstaller.uninstallHooks(cli: cli, fm: fm)
+        let uninstalledData = try XCTUnwrap(fm.contents(atPath: configPath))
+        let uninstalled = try XCTUnwrap(String(data: uninstalledData, encoding: .utf8))
 
-        // Uninstall and restore backup
-        ConfigInstaller.setEnabled(source: "kimi", enabled: false)
-        if fm.fileExists(atPath: backupPath) {
-            try? fm.removeItem(atPath: configPath)
-            try? fm.moveItem(atPath: backupPath, toPath: configPath)
-        }
+        XCTAssertTrue(uninstalled.contains("hooks = [\"UserPromptSubmit\"]"), "Legacy scalar hooks should be restored after uninstall")
+        XCTAssertFalse(uninstalled.contains("codeisland-bridge"), "CodeIsland hooks should be removed after uninstall")
     }
 }
 

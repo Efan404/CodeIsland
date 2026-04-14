@@ -911,7 +911,7 @@ struct ConfigInstaller {
 
     // MARK: - Kimi Code CLI (TOML hooks)
 
-    private static func installKimiHooks(cli: CLIConfig, fm: FileManager) -> Bool {
+    internal static func installKimiHooks(cli: CLIConfig, fm: FileManager) -> Bool {
         let path = cli.fullPath
         var contents = ""
         if fm.fileExists(atPath: path) {
@@ -919,17 +919,20 @@ struct ConfigInstaller {
         }
 
         contents = removeKimiHooks(from: contents)
-        // Remove any legacy scalar `hooks = ...` assignment that conflicts with TOML array-of-tables
+        // Comment out legacy scalar `hooks = ...` assignments that conflict with TOML array-of-tables
+        // so they can be restored on uninstall instead of being permanently lost.
         contents = contents
             .components(separatedBy: "\n")
-            .filter { line in
+            .map { line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                return !trimmed.hasPrefix("hooks =")
+                if trimmed.hasPrefix("hooks =") {
+                    return "# [CodeIsland] commented out legacy scalar hooks to avoid TOML conflict\n# \(line)"
+                }
+                return line
             }
             .joined(separator: "\n")
 
-        let quotedBridge = bridgeCommand.contains(" ") ? "\"\(bridgeCommand)\"" : bridgeCommand
-        let baseCommand = "\(quotedBridge) --source \(cli.source)"
+        let baseCommand = "\(bridgeCommand) --source \(cli.source)"
 
         var hookBlocks: [String] = []
         for (event, timeout, _) in cli.events {
@@ -1029,12 +1032,32 @@ struct ConfigInstaller {
 
     // MARK: - Uninstall (generic)
 
-    private static func uninstallHooks(cli: CLIConfig, fm: FileManager) {
+    internal static func uninstallHooks(cli: CLIConfig, fm: FileManager) {
         if cli.format == .kimi {
             guard fm.fileExists(atPath: cli.fullPath),
                   let data = fm.contents(atPath: cli.fullPath),
                   var contents = String(data: data, encoding: .utf8) else { return }
             contents = removeKimiHooks(from: contents)
+
+            // Restore commented-out legacy scalar hooks
+            let lines = contents.components(separatedBy: "\n")
+            var restored: [String] = []
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed == "# [CodeIsland] commented out legacy scalar hooks to avoid TOML conflict" {
+                    continue
+                }
+                if trimmed.hasPrefix("# hooks =") {
+                    restored.append(String(trimmed.dropFirst("# ".count)))
+                } else {
+                    restored.append(line)
+                }
+            }
+            while let last = restored.last, last.trimmingCharacters(in: .whitespaces).isEmpty {
+                restored.removeLast()
+            }
+            contents = restored.joined(separator: "\n")
+
             fm.createFile(atPath: cli.fullPath, contents: contents.data(using: .utf8))
             return
         }
