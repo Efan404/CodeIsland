@@ -565,6 +565,7 @@ final class AppState {
         case "workbuddy":  return findWorkBuddyPids(candidatePids: candidatePids)
         case "hermes":     return findHermesPids(candidatePids: candidatePids)
         case "qwen":       return findQwenPids(candidatePids: candidatePids)
+        case "kimi":       return findKimiPids(candidatePids: candidatePids)
         default:           return []
         }
     }
@@ -2172,6 +2173,20 @@ final class AppState {
             argSubstrings: [
                 "/@qwen-code/qwen-code/",
                 "/.qwen/",
+            ],
+            candidatePids: candidatePids
+        )
+    }
+
+    private nonisolated static func findKimiPids(candidatePids: [pid_t]? = nil) -> [pid_t] {
+        findPids(
+            matchingPathSubstrings: [
+                "/.local/bin/kimi",
+                "/.local/share/uv/tools/kimi-cli/",
+            ],
+            argSubstrings: [
+                "/kimi-cli/",
+                "kimi_cli",
             ],
             candidatePids: candidatePids
         )
