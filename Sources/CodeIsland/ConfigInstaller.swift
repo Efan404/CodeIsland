@@ -804,6 +804,15 @@ struct ConfigInstaller {
     @discardableResult
     private static func installExternalHooks(cli: CLIConfig, fm: FileManager) -> Bool {
         if cli.format == .kimi {
+            // Kimi: do not create ~/.kimi or config files unless there is already
+            // evidence of an existing Kimi installation/configuration.
+            let rootDir = NSHomeDirectory() + "/.kimi"
+            let sessionsDir = rootDir + "/sessions"
+            let hasKimiPresence =
+                fm.fileExists(atPath: cli.dirPath) ||
+                fm.fileExists(atPath: rootDir) ||
+                fm.fileExists(atPath: sessionsDir)
+            guard hasKimiPresence else { return true }
             if !fm.fileExists(atPath: cli.dirPath) {
                 try? fm.createDirectory(atPath: cli.dirPath, withIntermediateDirectories: true)
             }
@@ -932,7 +941,10 @@ struct ConfigInstaller {
             }
             .joined(separator: "\n")
 
-        let baseCommand = "\(bridgeCommand) --source \(cli.source)"
+        let quotedBridge = bridgeCommand.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+            ? "\"\(bridgeCommand)\""
+            : bridgeCommand
+        let baseCommand = "\(quotedBridge) --source \(cli.source)"
 
         var hookBlocks: [String] = []
         for (event, timeout, _) in cli.events {
@@ -1047,8 +1059,8 @@ struct ConfigInstaller {
                 if trimmed == "# [CodeIsland] commented out legacy scalar hooks to avoid TOML conflict" {
                     continue
                 }
-                if trimmed.hasPrefix("# hooks =") {
-                    restored.append(String(trimmed.dropFirst("# ".count)))
+                if trimmed.range(of: #"^#\s*hooks\s*="#, options: .regularExpression) != nil {
+                    restored.append(line.replacingOccurrences(of: #"^#\s*"#, with: "", options: .regularExpression))
                 } else {
                     restored.append(line)
                 }

@@ -1728,8 +1728,12 @@ final class AppState {
     private func backfillSessionMessages(sessionId: String, from info: DiscoveredSession) -> Bool {
         guard var session = sessions[sessionId], !info.recentMessages.isEmpty else { return false }
         var mutated = false
-        session.recentMessages = info.recentMessages
-        mutated = true
+        let messagesChanged = session.recentMessages.count != info.recentMessages.count ||
+            zip(session.recentMessages, info.recentMessages).contains { $0.isUser != $1.isUser || $0.text != $1.text }
+        if messagesChanged {
+            session.recentMessages = info.recentMessages
+            mutated = true
+        }
         if let lastUser = info.recentMessages.last(where: { $0.isUser }),
            session.lastUserPrompt != lastUser.text {
             session.lastUserPrompt = lastUser.text
